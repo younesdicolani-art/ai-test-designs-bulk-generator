@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutGrid, Layers, LogOut, Sparkles, Ghost, Wand2, Upload, X, Image as ImageIcon } from 'lucide-react';
+import { LayoutGrid, Layers, LogOut, Sparkles, Ghost, Wand2, Upload, X, Image as ImageIcon, AlertCircle } from 'lucide-react';
 import { ApiKeyModal } from './components/ApiKeyModal';
 import { Button, Input, Select, Badge } from './components/UI';
 import { DesignGallery } from './components/DesignGallery';
@@ -57,16 +57,22 @@ function App() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Basic validation
+    if (!file.type.startsWith('image/')) {
+        alert("Please upload an image file.");
+        return;
+    }
+
     const reader = new FileReader();
     reader.onloadend = () => {
       const result = reader.result as string;
-      // Extract base64 data without prefix for API if needed, but SDK usually handles standard format?
-      // The SDK expects raw base64 string for inlineData.
       const base64Data = result.split(',')[1];
       setUploadedImage({
         data: base64Data,
         mimeType: file.type
       });
+      // Clear niche text when image is uploaded to avoid confusion
+      setBulkNiche('');
     };
     reader.readAsDataURL(file);
   };
@@ -92,8 +98,8 @@ function App() {
       };
       setDesigns(prev => [newDesign, ...prev]);
       setSinglePrompt('');
-    } catch (e) {
-      alert("Generation failed. Please try again.");
+    } catch (e: any) {
+      alert(`Generation failed: ${e.message || "Unknown error"}`);
     } finally {
       setIsGeneratingSingle(false);
     }
@@ -113,15 +119,20 @@ function App() {
         ideas = await generateDesignIdeas(apiKey, bulkNiche, 10);
       }
 
+      if (ideas.length === 0) {
+          alert("Could not generate any ideas. Try a different prompt or image.");
+          return;
+      }
+
       const items: BulkItem[] = ideas.map((idea, idx) => ({
         id: `bulk-${Date.now()}-${idx}`,
         concept: idea,
         status: 'idle'
       }));
       setBulkItems(items);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      alert("Failed to generate ideas. Ensure your API Key is valid and has access to Gemini 2.5 Flash.");
+      alert(`Failed to generate ideas: ${e.message}`);
     } finally {
       setIsGeneratingIdeas(false);
     }
@@ -133,9 +144,9 @@ function App() {
 
     const pendingItems = bulkItems.filter(i => i.status === 'idle' || i.status === 'failed');
 
-    // Process sequentially to manage rate limits better
     for (const item of pendingItems) {
-      // Update item status to generating
+      // Check if we should stop (if user cleared queue mid-process, though implemented simply here)
+      
       setBulkItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'generating' } : i));
 
       try {
@@ -148,19 +159,16 @@ function App() {
           createdAt: Date.now()
         };
         
-        // Add to global designs
         setDesigns(prev => [newDesign, ...prev]);
-        
-        // Update bulk item
         setBulkItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'completed', result: newDesign } : i));
         
-        // Delay to avoid aggressive rate limiting
-        await new Promise(r => setTimeout(r, 2000));
+        // Wait 4 seconds to be safe with rate limits on standard keys
+        await new Promise(r => setTimeout(r, 4000));
 
       } catch (e) {
         console.error(`Failed to generate item ${item.id}:`, e);
         setBulkItems(prev => prev.map(i => i.id === item.id ? { ...i, status: 'failed' } : i));
-        // Continue to next even if one fails
+        // Continue to next
       }
     }
     setIsProcessingBulk(false);
@@ -219,10 +227,10 @@ function App() {
         <header className="flex justify-between items-center mb-8">
           <div>
             <h2 className="text-3xl font-bold text-white tracking-tight">
-              {activeTab === 'single' ? 'Design Studio' : 'Bulk Design Factory'}
+              {activeTab === 'single' ? 'Design Studio' : 'Bulk Scale Studio'}
             </h2>
             <p className="text-zinc-400 mt-1">
-              {activeTab === 'single' ? 'Create stunning T-shirt designs in seconds.' : 'Upload a design or enter a niche to scale your merch business.'}
+              {activeTab === 'single' ? 'Create stunning T-shirt designs in seconds.' : 'Upload a design to create unlimited variations or scale a niche.'}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -294,30 +302,18 @@ function App() {
                   </div>
 
                   {/* Tabs for source: Text vs Image */}
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     {!uploadedImage ? (
                       <>
-                         <Input 
-                          label="Target Niche" 
-                          placeholder="e.g. 'Coffee Lovers' or 'Gym Motivation'"
-                          value={bulkNiche}
-                          onChange={(e) => setBulkNiche(e.target.value)}
-                        />
-                        <div className="relative">
-                          <div className="absolute inset-0 flex items-center">
-                            <div className="w-full border-t border-zinc-800" />
-                          </div>
-                          <div className="relative flex justify-center text-xs uppercase">
-                            <span className="bg-zinc-900 px-2 text-zinc-500">Or upload reference</span>
-                          </div>
-                        </div>
                         <div 
-                          className="border-2 border-dashed border-zinc-700 hover:border-indigo-500/50 rounded-lg p-6 text-center cursor-pointer transition-colors bg-zinc-950/50"
+                          className="border-2 border-dashed border-zinc-700 hover:border-indigo-500/50 hover:bg-zinc-800/30 rounded-lg p-8 text-center cursor-pointer transition-all bg-zinc-950/30 group"
                           onClick={() => fileInputRef.current?.click()}
                         >
-                          <Upload className="h-8 w-8 text-zinc-500 mx-auto mb-2" />
-                          <p className="text-sm text-zinc-400">Click to upload image</p>
-                          <p className="text-xs text-zinc-600 mt-1">We'll generate variations based on it</p>
+                          <div className="bg-zinc-900 p-3 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform">
+                            <Upload className="h-5 w-5 text-indigo-400" />
+                          </div>
+                          <p className="text-sm font-medium text-zinc-300">Upload Reference Design</p>
+                          <p className="text-xs text-zinc-500 mt-1">We'll analyze it to create variations</p>
                           <input 
                             ref={fileInputRef}
                             type="file" 
@@ -326,18 +322,36 @@ function App() {
                             onChange={handleFileUpload}
                           />
                         </div>
+
+                        <div className="relative">
+                          <div className="absolute inset-0 flex items-center">
+                            <div className="w-full border-t border-zinc-800" />
+                          </div>
+                          <div className="relative flex justify-center text-xs uppercase">
+                            <span className="bg-zinc-900 px-2 text-zinc-500">Or enter niche</span>
+                          </div>
+                        </div>
+
+                         <Input 
+                          label="Target Niche" 
+                          placeholder="e.g. 'Coffee Lovers' or 'Gym Motivation'"
+                          value={bulkNiche}
+                          onChange={(e) => setBulkNiche(e.target.value)}
+                        />
                       </>
                     ) : (
-                      <div className="relative rounded-lg overflow-hidden border border-zinc-700 group">
+                      <div className="relative rounded-lg overflow-hidden border border-zinc-700 group ring-2 ring-indigo-500/20">
                         <img 
                           src={`data:${uploadedImage.mimeType};base64,${uploadedImage.data}`} 
                           alt="Upload preview" 
                           className="w-full h-48 object-cover opacity-60"
                         />
-                        <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
-                           <p className="text-white font-medium drop-shadow-md mb-2">Image Uploaded</p>
-                           <Button size="sm" variant="danger" onClick={clearUpload} className="h-8 text-xs">
-                             <X className="mr-1 h-3 w-3" /> Remove
+                        <div className="absolute inset-0 bg-gradient-to-t from-zinc-900/90 to-transparent flex flex-col items-center justify-end p-4">
+                           <p className="text-white font-medium drop-shadow-md mb-2 flex items-center gap-2">
+                             <Sparkles className="h-4 w-4 text-indigo-400" /> Ready to Scale
+                           </p>
+                           <Button size="sm" variant="danger" onClick={clearUpload} className="h-8 text-xs w-full">
+                             <X className="mr-1 h-3 w-3" /> Remove & Start Over
                            </Button>
                         </div>
                       </div>
@@ -399,21 +413,23 @@ function App() {
                     <ImageIcon className="h-8 w-8 opacity-50" />
                   </div>
                   <p className="text-sm font-medium">Ready for production</p>
-                  <p className="text-xs text-zinc-600 mt-1">Upload a design or enter a niche to start.</p>
+                  <p className="text-xs text-zinc-600 mt-1 max-w-xs text-center">Upload a reference design to create scalable variations, or start with a niche concept.</p>
                 </div>
               ) : (
                 <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
                   {bulkItems.map((item) => (
                     <div key={item.id} className="flex items-center gap-4 bg-zinc-900 border border-zinc-800 p-3 rounded-lg hover:border-zinc-700 transition-colors group">
-                      <div className="h-20 w-20 bg-zinc-950 rounded-md overflow-hidden flex-shrink-0 flex items-center justify-center border border-zinc-800">
+                      <div className="h-20 w-20 bg-zinc-950 rounded-md overflow-hidden flex-shrink-0 flex items-center justify-center border border-zinc-800 relative">
                         {item.result ? (
                           <img src={item.result.imageUrl} className="h-full w-full object-cover" />
                         ) : (
-                           item.status === 'generating' ? <Loader2 className="animate-spin text-indigo-500 h-6 w-6" /> : <Ghost className="text-zinc-700 h-6 w-6" />
+                           item.status === 'generating' ? <Loader2 className="animate-spin text-indigo-500 h-6 w-6" /> : 
+                           item.status === 'failed' ? <AlertCircle className="text-red-500 h-6 w-6" /> :
+                           <Ghost className="text-zinc-700 h-6 w-6" />
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-white truncate mb-1">{item.concept}</p>
+                        <p className="text-sm font-medium text-white truncate mb-1" title={item.concept}>{item.concept}</p>
                         <div className="flex items-center gap-2">
                            <span className="text-xs text-zinc-500 bg-zinc-950 px-1.5 py-0.5 rounded border border-zinc-800">{bulkStyle}</span>
                         </div>
@@ -422,7 +438,7 @@ function App() {
                         {item.status === 'idle' && <Badge>Pending</Badge>}
                         {item.status === 'generating' && <Badge variant="warning">Creating...</Badge>}
                         {item.status === 'completed' && <Badge variant="success">Done</Badge>}
-                        {item.status === 'failed' && <span className="text-xs text-red-500 font-medium bg-red-500/10 px-2 py-1 rounded border border-red-500/20">Failed</span>}
+                        {item.status === 'failed' && <span className="text-xs text-red-400 font-medium flex items-center gap-1"><AlertCircle className="h-3 w-3"/> Failed</span>}
                       </div>
                     </div>
                   ))}
