@@ -1,0 +1,5 @@
+{
+  "name": "MerchGhost AI Clone",
+  "description": "A high-performance T-shirt design generator featuring single and bulk creation modes using Google Gemini models.",
+  "requestFramePermissions": []
+}
